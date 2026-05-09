@@ -48,9 +48,12 @@ jobs:
           - { tag: "14-to-16",   from: "14",   to: "16",  old_distro: "-bookworm", distro: "bookworm" }
           - { tag: "15-to-16",   from: "15",   to: "16",  old_distro: "-bookworm", distro: "bookworm" }
           # ── PostGIS extension flavor ──────────────────────────────────────
-          # Four representative paths: two bullseye (EOL sources), two bookworm.
-          - { tag: "9.6-to-16-postgis", from: "9.6", to: "16", old_distro: "",          distro: "bullseye", extensions: "postgis" }
-          - { tag: "11-to-16-postgis", from: "11", to: "16", old_distro: "",          distro: "bullseye", extensions: "postgis" }
+          # postgres:9.6 and the untagged postgres:11 are frozen on Debian
+          # Stretch, which has no PostGIS 3 package (PGDG stretch is gone)
+          # and no upgrade path from the available PostGIS 2.3 to 3.x.
+          # Use postgres:11-bullseye which carries PostGIS 3 via PGDG bullseye.
+          # PG 9.6 + PostGIS is untestable until a bullseye-based 9.6 image exists.
+          - { tag: "11-to-16-postgis", from: "11", to: "16", old_distro: "-bullseye", distro: "bullseye", extensions: "postgis" }
           - { tag: "13-to-16-postgis", from: "13", to: "16", old_distro: "-bookworm", distro: "bookworm", extensions: "postgis" }
           - { tag: "15-to-16-postgis", from: "15", to: "16", old_distro: "-bookworm", distro: "bookworm", extensions: "postgis" }
 
@@ -131,7 +134,6 @@ jobs:
           - { tag: "13-to-16",   from: "13",   to: "16"  }
           - { tag: "14-to-16",   from: "14",   to: "16"  }
           - { tag: "15-to-16",   from: "15",   to: "16"  }
-          - { tag: "9.6-to-16-postgis", from: "9.6", to: "16" }
           - { tag: "11-to-16-postgis", from: "11", to: "16" }
           - { tag: "13-to-16-postgis", from: "13", to: "16" }
           - { tag: "15-to-16-postgis", from: "15", to: "16" }
