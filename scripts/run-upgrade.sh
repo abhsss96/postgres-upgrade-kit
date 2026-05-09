@@ -18,64 +18,65 @@ cd "${WORK_DIR}"
 
 hr() { printf '%.0s─' {1..70}; echo; }
 has_report() { [ -d "/reports" ] && [ -w "/reports" ]; }
-rpt() { has_report && echo "$1" >> "${REPORT_FILE}"; }
+rpt() { has_report && echo "$1" >> "${REPORT_FILE}" || true; }
 
-# Writes a directory-breakdown table to stdout (plain) and report (markdown).
-snapshot_dirs() {
-  local label="$1" data_dir="$2"
+# Prints a side-by-side comparison of old vs new cluster directories to stdout
+# and appends a markdown table to the report.
+compare_clusters() {
+  local old_dir="$1" new_dir="$2"
+  local tmp_old tmp_new
+  tmp_old=$(mktemp) && tmp_new=$(mktemp)
 
+  du -sh "${old_dir}"/*/  2>/dev/null | sort -rh | \
+    awk -v base="${old_dir}/" '{size=$1; path=$2; sub(base,"",path); sub("/$","",path); print path, size}' \
+    > "${tmp_old}"
+
+  du -sh "${new_dir}"/*/  2>/dev/null | sort -rh | \
+    awk -v base="${new_dir}/" '{size=$1; path=$2; sub(base,"",path); sub("/$","",path); print path, size}' \
+    > "${tmp_new}"
+
+  local old_total new_total
+  old_total=$(du -sh "${old_dir}" 2>/dev/null | cut -f1)
+  new_total=$(du -sh "${new_dir}" 2>/dev/null | cut -f1)
+
+  local all_dirs
+  all_dirs=$(awk '{print $1}' "${tmp_old}" "${tmp_new}" | sort -u)
+
+  # ── stdout ──
   echo ""; hr
-  printf "  %s\n" "${label}"
-  printf "  %-20s %s\n" "Path:"        "${data_dir}"
-  printf "  %-20s %s\n" "Total size:"  "$(du -sh "${data_dir}" 2>/dev/null | cut -f1)"
+  printf "  %-35s %-10s %s\n" "Directory" "PG ${OLD_PG_VERSION}" "PG ${NEW_PG_VERSION}"
+  printf "  %-35s %-10s %s\n" "---------" "----------" "----------"
+  printf "  %-35s %-10s %s\n" "(total)" "${old_total}" "${new_total}"
+  while IFS= read -r dir; do
+    [ -z "${dir}" ] && continue
+    old_size=$(grep "^${dir} " "${tmp_old}" | awk '{print $2}')
+    new_size=$(grep "^${dir} " "${tmp_new}" | awk '{print $2}')
+    [ -z "${old_size}" ] && old_size="—"
+    [ -z "${new_size}" ] && new_size="—"
+    printf "  %-35s %-10s %s\n" "${dir}/" "${old_size}" "${new_size}"
+  done <<< "${all_dirs}"
   hr
 
-  echo "  Directories:"
-  while IFS= read -r line; do
-    size=$(echo "$line" | awk '{print $1}')
-    dir=$( echo "$line" | awk '{print $2}' | sed "s|${data_dir}/||")
-    printf "    %-40s %s\n" "${dir}/" "${size}"
-  done < <(du -sh "${data_dir}"/*/  2>/dev/null | sort -rh)
-
-  echo "  Files:"
-  while IFS= read -r f; do
-    size=$(du -sh "${f}" 2>/dev/null | cut -f1)
-    printf "    %-40s %s\n" "$(basename "${f}")" "${size}"
-  done < <(find "${data_dir}" -maxdepth 1 -type f | sort)
-
+  # ── markdown report ──
   if has_report; then
     rpt ""
-    rpt "#### ${label}"
+    rpt "### Cluster comparison"
     rpt ""
-    rpt "| Path | Size |"
-    rpt "|---|---|"
-    rpt "| **Total** | **$(du -sh "${data_dir}" 2>/dev/null \| cut -f1)** |"
-    while IFS= read -r line; do
-      size=$(echo "$line" | awk '{print $1}')
-      dir=$( echo "$line" | awk '{print $2}' | sed "s|${data_dir}/||")
-      rpt "| \`${dir}/\` | ${size} |"
-    done < <(du -sh "${data_dir}"/*/  2>/dev/null | sort -rh)
-    while IFS= read -r f; do
-      size=$(du -sh "${f}" 2>/dev/null | cut -f1)
-      rpt "| \`$(basename "${f}")\` | ${size} |"
-    done < <(find "${data_dir}" -maxdepth 1 -type f | sort)
+    rpt "| Directory | PostgreSQL ${OLD_PG_VERSION} | PostgreSQL ${NEW_PG_VERSION} |"
+    rpt "|---|---|---|"
+    rpt "| **Total** | **${old_total}** | **${new_total}** |"
+    while IFS= read -r dir; do
+      [ -z "${dir}" ] && continue
+      old_size=$(grep "^${dir} " "${tmp_old}" | awk '{print $2}')
+      new_size=$(grep "^${dir} " "${tmp_new}" | awk '{print $2}')
+      [ -z "${old_size}" ] && old_size="—"
+      [ -z "${new_size}" ] && new_size="—"
+      rpt "| \`${dir}/\` | ${old_size} | ${new_size} |"
+    done <<< "${all_dirs}"
   fi
+
+  rm -f "${tmp_old}" "${tmp_new}"
 }
-
-# ── Initialise report ─────────────────────────────────────────────────────────
-
-if has_report; then
-  cat > "${REPORT_FILE}" <<MD
-## pg_upgrade — PostgreSQL ${OLD_PG_VERSION} → ${NEW_PG_VERSION}
-
-### Cluster snapshots
-MD
-fi
-
-# ── Snapshot old cluster ──────────────────────────────────────────────────────
-
-echo "==> Snapshotting old cluster before upgrade"
-snapshot_dirs "Old cluster — PostgreSQL ${OLD_PG_VERSION}" "${OLD_DATA_DIR}"
 
 # ── Initialise new cluster ────────────────────────────────────────────────────
 
@@ -122,11 +123,11 @@ else
   echo "    (analyze_new_cluster.sh not found — skipping)"
 fi
 
-# ── Snapshot new cluster ──────────────────────────────────────────────────────
+# ── Cluster comparison ───────────────────────────────────────────────────────
 
 echo ""
-echo "==> Snapshotting new cluster after upgrade"
-snapshot_dirs "New cluster — PostgreSQL ${NEW_PG_VERSION}" "${NEW_DATA_DIR}"
+echo "==> Cluster comparison — PostgreSQL ${OLD_PG_VERSION} → ${NEW_PG_VERSION}"
+compare_clusters "${OLD_DATA_DIR}" "${NEW_DATA_DIR}"
 
 # ── Structural renames ────────────────────────────────────────────────────────
 

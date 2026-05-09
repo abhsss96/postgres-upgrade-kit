@@ -2,14 +2,16 @@
 set -euo pipefail
 
 NEW_PG_VERSION="${NEW_PG_VERSION:?NEW_PG_VERSION env var must be set}"
+OLD_PG_VERSION="${OLD_PG_VERSION:?OLD_PG_VERSION env var must be set}"
 NEW_DATA_DIR="/var/lib/postgresql/${NEW_PG_VERSION}/main"
 NEW_BIN="/usr/lib/postgresql/${NEW_PG_VERSION}/bin"
 PSQL="${NEW_BIN}/psql"
 REPORT_FILE="/reports/upgrade.md"
+OLD_DB_SIZES_FILE="/reports/old-db-sizes.txt"
 
 hr() { printf '%.0s─' {1..70}; echo; }
 has_report() { [ -d "/reports" ] && [ -w "/reports" ]; }
-rpt() { has_report && echo "$1" >> "${REPORT_FILE}"; }
+rpt() { has_report && echo "$1" >> "${REPORT_FILE}" || true; }
 
 echo "==> Starting PostgreSQL ${NEW_PG_VERSION}"
 "${NEW_BIN}/pg_ctl" -D "${NEW_DATA_DIR}" -l "${NEW_DATA_DIR}/pg.log" start -w
@@ -88,37 +90,44 @@ mv_count=$(run_sql analytics "SELECT COUNT(*) FROM daily_event_counts;")
 
 echo ""
 hr
-echo "  Database size report — PostgreSQL ${NEW_PG_VERSION} (post-upgrade)"
+echo "  Database sizes — PostgreSQL ${OLD_PG_VERSION} → ${NEW_PG_VERSION}"
 hr
-printf "  %-30s %15s\n" "Database" "Size"
-printf "  %-30s %15s\n" "--------" "----"
-while IFS='|' read -r dbname size; do
-  printf "  %-30s %15s\n" "${dbname}" "${size}"
+printf "  %-25s %-15s %s\n" "Database" "PG ${OLD_PG_VERSION}" "PG ${NEW_PG_VERSION}"
+printf "  %-25s %-15s %s\n" "--------" "----------" "----------"
+while IFS='|' read -r dbname new_size; do
+  old_size="—"
+  if [ -f "${OLD_DB_SIZES_FILE}" ]; then
+    old_size=$(grep "^${dbname}|" "${OLD_DB_SIZES_FILE}" | cut -d'|' -f2)
+    [ -z "${old_size}" ] && old_size="—"
+  fi
+  printf "  %-25s %-15s %s\n" "${dbname}" "${old_size}" "${new_size}"
 done < <(run_sql postgres "
   SELECT datname, pg_size_pretty(pg_database_size(datname))
   FROM pg_database
   WHERE datname NOT IN ('template0','template1')
   ORDER BY pg_database_size(datname) DESC;
 ")
-echo ""
-printf "  %-30s %15s\n" "Total cluster size:" "$(du -sh "${NEW_DATA_DIR}" 2>/dev/null | cut -f1)"
 hr
 
 if has_report; then
   rpt ""
-  rpt "### Database sizes (post-upgrade)"
+  rpt "### Database sizes"
   rpt ""
-  rpt "| Database | Size |"
-  rpt "|---|---|"
-  while IFS='|' read -r dbname size; do
-    rpt "| \`${dbname}\` | ${size} |"
+  rpt "| Database | PostgreSQL ${OLD_PG_VERSION} | PostgreSQL ${NEW_PG_VERSION} |"
+  rpt "|---|---|---|"
+  while IFS='|' read -r dbname new_size; do
+    old_size="—"
+    if [ -f "${OLD_DB_SIZES_FILE}" ]; then
+      old_size=$(grep "^${dbname}|" "${OLD_DB_SIZES_FILE}" | cut -d'|' -f2)
+      [ -z "${old_size}" ] && old_size="—"
+    fi
+    rpt "| \`${dbname}\` | ${old_size} | ${new_size} |"
   done < <(run_sql postgres "
     SELECT datname, pg_size_pretty(pg_database_size(datname))
     FROM pg_database
     WHERE datname NOT IN ('template0','template1')
     ORDER BY pg_database_size(datname) DESC;
   ")
-  rpt "| **Total cluster** | **$(du -sh "${NEW_DATA_DIR}" 2>/dev/null \| cut -f1)** |"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────

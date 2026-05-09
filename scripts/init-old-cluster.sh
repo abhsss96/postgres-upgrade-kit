@@ -8,6 +8,12 @@ OLD_BIN="/usr/lib/postgresql/${OLD_PG_VERSION}/bin"
 # Use the new version's psql — it is backward-compatible with older servers
 # and avoids libreadline ABI mismatches between the source and target distros.
 PSQL="/usr/lib/postgresql/${NEW_PG_VERSION}/bin/psql"
+REPORT_FILE="/reports/upgrade.md"
+OLD_DB_SIZES_FILE="/reports/old-db-sizes.txt"
+
+hr() { printf '%.0s─' {1..70}; echo; }
+has_report() { [ -d "/reports" ] && [ -w "/reports" ]; }
+rpt() { has_report && echo "$1" >> "${REPORT_FILE}" || true; }
 
 echo "==> Initializing PostgreSQL ${OLD_PG_VERSION} cluster at ${OLD_DATA_DIR}"
 "${OLD_BIN}/initdb" \
@@ -97,7 +103,64 @@ CREATE MATERIALIZED VIEW daily_event_counts AS
 CREATE INDEX idx_daily_event_counts_day ON daily_event_counts(day);
 SQL
 
+# Save per-DB sizes while the old cluster is still running.
+if has_report; then
+  "${PSQL}" -U postgres -h 127.0.0.1 -d postgres -tAc "
+    SELECT datname || '|' || pg_size_pretty(pg_database_size(datname))
+    FROM pg_database
+    WHERE datname NOT IN ('template0','template1')
+    ORDER BY pg_database_size(datname) DESC;
+  " > "${OLD_DB_SIZES_FILE}"
+fi
+
 echo "==> Stopping PostgreSQL ${OLD_PG_VERSION}"
 "${OLD_BIN}/pg_ctl" -D "${OLD_DATA_DIR}" stop -m fast
 
+# ── Snapshot old cluster ──────────────────────────────────────────────────────
+
+echo ""
+echo "==> Snapshotting old cluster after initialization"
+hr
+printf "  %s\n" "Old cluster — PostgreSQL ${OLD_PG_VERSION}"
+printf "  %-20s %s\n" "Path:"       "${OLD_DATA_DIR}"
+printf "  %-20s %s\n" "Total size:" "$(du -sh "${OLD_DATA_DIR}" 2>/dev/null | cut -f1)"
+hr
+
+echo "  Directories:"
+while IFS= read -r line; do
+  size=$(echo "$line" | awk '{print $1}')
+  dir=$( echo "$line" | awk '{print $2}' | sed "s|${OLD_DATA_DIR}/||")
+  printf "    %-40s %s\n" "${dir}/" "${size}"
+done < <(du -sh "${OLD_DATA_DIR}"/*/  2>/dev/null | sort -rh)
+
+echo "  Files:"
+while IFS= read -r f; do
+  size=$(du -sh "${f}" 2>/dev/null | cut -f1)
+  printf "    %-40s %s\n" "$(basename "${f}")" "${size}"
+done < <(find "${OLD_DATA_DIR}" -maxdepth 1 -type f | sort)
+
+if has_report; then
+  cat > "${REPORT_FILE}" <<MD
+## pg_upgrade — PostgreSQL ${OLD_PG_VERSION} → ${NEW_PG_VERSION}
+
+### Cluster snapshots
+
+#### Old cluster — PostgreSQL ${OLD_PG_VERSION} (post-init)
+
+| Path | Size |
+|---|---|
+| **Total** | **$(du -sh "${OLD_DATA_DIR}" 2>/dev/null | cut -f1)** |
+MD
+  while IFS= read -r line; do
+    size=$(echo "$line" | awk '{print $1}')
+    dir=$( echo "$line" | awk '{print $2}' | sed "s|${OLD_DATA_DIR}/||")
+    rpt "| \`${dir}/\` | ${size} |"
+  done < <(du -sh "${OLD_DATA_DIR}"/*/  2>/dev/null | sort -rh)
+  while IFS= read -r f; do
+    size=$(du -sh "${f}" 2>/dev/null | cut -f1)
+    rpt "| \`$(basename "${f}")\` | ${size} |"
+  done < <(find "${OLD_DATA_DIR}" -maxdepth 1 -type f | sort)
+fi
+
+echo ""
 echo "==> PostgreSQL ${OLD_PG_VERSION} cluster initialized with test data."
