@@ -3,6 +3,11 @@ set -euo pipefail
 
 SCRIPTS_DIR="/usr/local/bin/pg-upgrade-scripts"
 
+# Docker volumes are mounted as root:root by default. Fix ownership before
+# dropping to the postgres user so scripts can write the upgrade report.
+mkdir -p /reports
+chown postgres:postgres /reports
+
 case "${1:-}" in
   init-old)
     exec gosu postgres "${SCRIPTS_DIR}/init-old-cluster.sh"
