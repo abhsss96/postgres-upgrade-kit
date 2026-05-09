@@ -14,6 +14,7 @@ OLD_DB_SIZES_FILE="/reports/old-db-sizes.txt"
 hr() { printf '%.0s─' {1..70}; echo; }
 has_report() { [ -d "/reports" ] && [ -w "/reports" ]; }
 rpt() { has_report && echo "$1" >> "${REPORT_FILE}" || true; }
+has_extension() { echo ",${EXTENSIONS:-}," | grep -q ",${1},"; }
 
 echo "==> Initializing PostgreSQL ${OLD_PG_VERSION} cluster at ${OLD_DATA_DIR}"
 "${OLD_BIN}/initdb" \
@@ -102,6 +103,26 @@ CREATE MATERIALIZED VIEW daily_event_counts AS
 
 CREATE INDEX idx_daily_event_counts_day ON daily_event_counts(day);
 SQL
+
+# ── PostGIS fixtures ─────────────────────────────────────────────────────────
+
+if has_extension postgis; then
+  echo "==> Creating PostGIS fixtures in testdb"
+  "${PSQL}" -U postgres -h 127.0.0.1 -d testdb -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+  "${PSQL}" -U postgres -h 127.0.0.1 -d testdb <<'SQL'
+CREATE TABLE locations (
+    id   SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    geom geometry(Point, 4326) NOT NULL
+);
+INSERT INTO locations (name, geom) VALUES
+    ('New York', ST_SetSRID(ST_MakePoint( -74.0060,  40.7128), 4326)),
+    ('London',   ST_SetSRID(ST_MakePoint(  -0.1276,  51.5074), 4326)),
+    ('Tokyo',    ST_SetSRID(ST_MakePoint( 139.6917,  35.6895), 4326)),
+    ('Sydney',   ST_SetSRID(ST_MakePoint( 151.2093, -33.8688), 4326));
+CREATE INDEX idx_locations_geom ON locations USING gist(geom);
+SQL
+fi
 
 # Save per-DB sizes while the old cluster is still running.
 if has_report; then

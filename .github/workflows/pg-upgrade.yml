@@ -47,6 +47,11 @@ jobs:
           - { tag: "13-to-16",   from: "13",   to: "16",  old_distro: "-bookworm", distro: "bookworm" }
           - { tag: "14-to-16",   from: "14",   to: "16",  old_distro: "-bookworm", distro: "bookworm" }
           - { tag: "15-to-16",   from: "15",   to: "16",  old_distro: "-bookworm", distro: "bookworm" }
+          # ── PostGIS extension flavor ──────────────────────────────────────
+          # Three representative paths: one bullseye, two bookworm.
+          - { tag: "11-to-16-postgis", from: "11", to: "16", old_distro: "",          distro: "bullseye", extensions: "postgis" }
+          - { tag: "13-to-16-postgis", from: "13", to: "16", old_distro: "-bookworm", distro: "bookworm", extensions: "postgis" }
+          - { tag: "15-to-16-postgis", from: "15", to: "16", old_distro: "-bookworm", distro: "bookworm", extensions: "postgis" }
 
     steps:
       - name: Checkout
@@ -82,6 +87,7 @@ jobs:
             OLD_PG_VERSION=${{ matrix.upgrade.from }}
             NEW_PG_VERSION=${{ matrix.upgrade.to }}
             NEW_PG_DISTRO=${{ matrix.upgrade.distro }}
+            EXTENSIONS=${{ matrix.upgrade.extensions || '' }}
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/pg-upgrade:${{ matrix.upgrade.tag }}-${{ github.sha }}
@@ -124,6 +130,9 @@ jobs:
           - { tag: "13-to-16",   from: "13",   to: "16"  }
           - { tag: "14-to-16",   from: "14",   to: "16"  }
           - { tag: "15-to-16",   from: "15",   to: "16"  }
+          - { tag: "11-to-16-postgis", from: "11", to: "16" }
+          - { tag: "13-to-16-postgis", from: "13", to: "16" }
+          - { tag: "15-to-16-postgis", from: "15", to: "16" }
 
     steps:
       - name: Log in to GHCR

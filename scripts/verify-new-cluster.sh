@@ -12,6 +12,7 @@ OLD_DB_SIZES_FILE="/reports/old-db-sizes.txt"
 hr() { printf '%.0s─' {1..70}; echo; }
 has_report() { [ -d "/reports" ] && [ -w "/reports" ]; }
 rpt() { has_report && echo "$1" >> "${REPORT_FILE}" || true; }
+has_extension() { echo ",${EXTENSIONS:-}," | grep -q ",${1},"; }
 
 echo "==> Starting PostgreSQL ${NEW_PG_VERSION}"
 "${NEW_BIN}/pg_ctl" -D "${NEW_DATA_DIR}" -l "${NEW_DATA_DIR}/pg.log" start -w
@@ -40,6 +41,31 @@ fail() {
 }
 
 run_sql() { "${PSQL}" -U postgres -h 127.0.0.1 -d "$1" -tAc "$2"; }
+
+# ── Post-upgrade extension refresh ───────────────────────────────────────────
+# pg_upgrade binary-copies the catalog, so extensions stay registered but their
+# SQL function bodies reference old library versions. Run ALTER EXTENSION UPDATE
+# (or postgis_extensions_upgrade() for PostGIS) to sync them to the installed .so.
+
+if [ -n "${EXTENSIONS:-}" ]; then
+  echo ""
+  echo "==> Refreshing extensions after pg_upgrade"
+  for db in $(run_sql postgres \
+      "SELECT datname FROM pg_database \
+       WHERE datname NOT IN ('template0','template1','postgres') ORDER BY datname;"); do
+    while IFS= read -r ext; do
+      [ -z "${ext}" ] && continue
+      if [ "${ext}" = "postgis" ]; then
+        echo "    postgis_extensions_upgrade() in ${db}"
+        run_sql "${db}" "SELECT postgis_extensions_upgrade();" > /dev/null
+      else
+        echo "    ALTER EXTENSION ${ext} UPDATE in ${db}"
+        run_sql "${db}" "ALTER EXTENSION \"${ext}\" UPDATE;" || true
+      fi
+    done < <(run_sql "${db}" \
+        "SELECT extname FROM pg_extension WHERE extname NOT IN ('plpgsql') ORDER BY extname;")
+  done
+fi
 
 # ── Integrity checks ──────────────────────────────────────────────────────────
 
@@ -85,6 +111,37 @@ fk_count=$(run_sql testdb "SELECT COUNT(*) FROM information_schema.table_constra
 
 mv_count=$(run_sql analytics "SELECT COUNT(*) FROM daily_event_counts;")
 [ "${mv_count}" -ge 1 ]    && pass "Materialized view daily_event_counts: ${mv_count} rows" || fail "Materialized view daily_event_counts empty"
+
+# ── PostGIS checks ────────────────────────────────────────────────────────────
+
+if has_extension postgis; then
+  echo ""
+  echo "==> PostGIS checks"
+
+  postgis_ver=$(run_sql testdb "SELECT PostGIS_Version();")
+  [ -n "${postgis_ver}" ] \
+    && pass "PostGIS version: ${postgis_ver}" \
+    || fail "PostGIS_Version() returned empty"
+
+  loc_count=$(run_sql testdb "SELECT COUNT(*) FROM locations;")
+  [ "${loc_count}" -ge 4 ] \
+    && pass "PostGIS: locations table has ${loc_count} rows" \
+    || fail "PostGIS: locations row count unexpected: ${loc_count}"
+
+  dist_ok=$(run_sql testdb "SELECT ST_Distance(
+    'SRID=4326;POINT(-74.006 40.7128)'::geography,
+    'SRID=4326;POINT(-0.1276 51.5074)'::geography
+  ) > 5000000;")
+  [ "${dist_ok}" = "t" ] \
+    && pass "PostGIS: ST_Distance (NY→London) > 5 000 km" \
+    || fail "PostGIS: ST_Distance check failed"
+
+  if has_report; then
+    rpt "| ✅ | PostGIS version: ${postgis_ver} |"
+    rpt "| ✅ | locations: ${loc_count} spatial rows survived upgrade |"
+    rpt "| ✅ | ST_Distance (NY→London) works |"
+  fi
+fi
 
 # ── Per-database size report ──────────────────────────────────────────────────
 
