@@ -50,11 +50,25 @@ The upgrade runs as three container steps sharing data through Docker volumes:
 
 Images are published to **[abhsss/pg-upgrade on DockerHub](https://hub.docker.com/repository/docker/abhsss/pg-upgrade/general)**.
 
-| From | To | Pull command |
-|---|---|---|
-| PostgreSQL 9.6 | PostgreSQL 16 | `docker pull abhsss/pg-upgrade:9.6-to-16` |
+| From ↓  To → | PG 12 | PG 13 | PG 14 | PG 15 | PG 16 |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **PG 9.6** | `9.6-to-12` | `9.6-to-13` | `9.6-to-14` | `9.6-to-15` | `9.6-to-16` |
+| **PG 10**  | — | — | `10-to-14` | `10-to-15` | `10-to-16` |
+| **PG 11**  | — | — | `11-to-14` | `11-to-15` | `11-to-16` |
+| **PG 12**  | — | — | `12-to-14` | `12-to-15` | `12-to-16` |
+| **PG 13**  | — | — | — | `13-to-15` | `13-to-16` |
+| **PG 14**  | — | — | — | — | `14-to-16` |
+| **PG 15**  | — | — | — | — | `15-to-16` |
 
-More paths are planned. See [Adding a New Upgrade Path](#adding-a-new-upgrade-path).
+Pull any image with:
+
+```bash
+docker pull abhsss/pg-upgrade:<tag>
+# e.g.
+docker pull abhsss/pg-upgrade:13-to-16
+```
+
+See [Adding a New Upgrade Path](#adding-a-new-upgrade-path) to request or contribute additional paths.
 
 ---
 
@@ -83,28 +97,32 @@ The scripts are fully parameterized via `OLD_PG_VERSION` and `NEW_PG_VERSION` en
 ## Quick Start (Local)
 
 ```bash
-# 1. Build
-docker build -f upgrades/9.6-to-16/Dockerfile -t pg-upgrade:9.6-to-16 .
+# 1. Build — use any per-path Dockerfile, or the generic one with build args
+docker build -f upgrades/13-to-16/Dockerfile -t pg-upgrade:13-to-16 .
+
+# Or build any path without a dedicated Dockerfile:
+# docker build --build-arg OLD_PG_VERSION=13 --build-arg NEW_PG_VERSION=16 \
+#   -t pg-upgrade:13-to-16 .
 
 # 2. Create volumes
 docker volume create pg-old-data
 docker volume create pg-new-data
 
-# 3. Seed PostgreSQL 9.6
+# 3. Seed PostgreSQL 13 with test data
 docker run --rm \
-  -v pg-old-data:/var/lib/postgresql/9.6/main \
-  abhsss/pg-upgrade:9.6-to-16 init-old
+  -v pg-old-data:/var/lib/postgresql/13/main \
+  abhsss/pg-upgrade:13-to-16 init-old
 
 # 4. Upgrade to PostgreSQL 16
 docker run --rm \
-  -v pg-old-data:/var/lib/postgresql/9.6/main \
+  -v pg-old-data:/var/lib/postgresql/13/main \
   -v pg-new-data:/var/lib/postgresql/16/main \
-  abhsss/pg-upgrade:9.6-to-16 upgrade
+  abhsss/pg-upgrade:13-to-16 upgrade
 
 # 5. Verify
 docker run --rm \
   -v pg-new-data:/var/lib/postgresql/16/main \
-  abhsss/pg-upgrade:9.6-to-16 verify
+  abhsss/pg-upgrade:13-to-16 verify
 
 # 6. Cleanup
 docker volume rm pg-old-data pg-new-data
@@ -335,21 +353,33 @@ The upgraded cluster performs identically to a fresh PostgreSQL 16 installation 
 
 ## Adding a New Upgrade Path
 
-1. **Create the Dockerfile** at `upgrades/<old>-to-<new>/Dockerfile`.
-   Copy `upgrades/9.6-to-16/Dockerfile` and update the two `FROM` stages and the `ENV OLD_PG_VERSION` / `ENV NEW_PG_VERSION` values.
+The repo ships a **generic `Dockerfile`** at the root that accepts build args,
+so adding a new path is a two-step change.
 
-2. **Register it in the CI matrix** inside `.github/workflows/pg-upgrade.yml`:
+1. **Create the per-path Dockerfile** at `upgrades/<old>-to-<new>/Dockerfile`.
+   It is a minimal wrapper that pins its own defaults — copy any existing one
+   and change the three `ARG` defaults at the top:
 
-   ```yaml
-   matrix:
-     upgrade:
-       - tag: "9.6-to-16"
-         dockerfile: "upgrades/9.6-to-16/Dockerfile"
-       - tag: "13-to-16"           # <-- new entry
-         dockerfile: "upgrades/13-to-16/Dockerfile"
+   ```dockerfile
+   ARG OLD_PG_VERSION=14
+   ARG NEW_PG_VERSION=17
+   ARG NEW_PG_DISTRO=bookworm   # use bookworm for PG 17+
    ```
 
-   And add the matching entry in the `test-upgrade` matrix with `from_version` / `to_version`.
+   > **Note for PG 17+ targets:** Debian Bookworm uses OpenSSL 3 (`libssl.so.3`).
+   > Old versions 9.6–14 were compiled against `libssl.so.1.1` (Bullseye).
+   > Add a `COPY --from=old_binaries` line for `libssl.so.1.1` and run
+   > `ldconfig` to make both coexist. See [issue #TBD] for a tracked example.
+
+2. **Add the path to both matrices** in `.github/workflows/pg-upgrade.yml`:
+
+   ```yaml
+   # build-and-push matrix
+   - { tag: "14-to-17", dockerfile: "upgrades/14-to-17/Dockerfile" }
+
+   # test-upgrade matrix
+   - { tag: "14-to-17", from: "14", to: "17" }
+   ```
 
 No changes to the shared scripts are needed.
 

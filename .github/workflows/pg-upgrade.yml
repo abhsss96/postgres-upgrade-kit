@@ -7,23 +7,43 @@ on:
     branches: [main, master]
 
 jobs:
-  # ── Build image and push to DockerHub ─────────────────────────────────────
+  # ── Build and push all upgrade images to DockerHub ────────────────────────
   build-and-push:
-    name: Build & Push (${{ matrix.upgrade.tag }})
+    name: Build ${{ matrix.upgrade.tag }}
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
         upgrade:
-          - tag: "9.6-to-16"
-            dockerfile: "upgrades/9.6-to-16/Dockerfile"
-          # Add new upgrade paths here, e.g.:
-          # - tag: "13-to-16"
-          #   dockerfile: "upgrades/13-to-16/Dockerfile"
+          # ── From 9.6 ──────────────────────────────────────────────────────
+          - { tag: "9.6-to-12",  dockerfile: "upgrades/9.6-to-12/Dockerfile"  }
+          - { tag: "9.6-to-13",  dockerfile: "upgrades/9.6-to-13/Dockerfile"  }
+          - { tag: "9.6-to-14",  dockerfile: "upgrades/9.6-to-14/Dockerfile"  }
+          - { tag: "9.6-to-15",  dockerfile: "upgrades/9.6-to-15/Dockerfile"  }
+          - { tag: "9.6-to-16",  dockerfile: "upgrades/9.6-to-16/Dockerfile"  }
+          # ── From 10 ───────────────────────────────────────────────────────
+          - { tag: "10-to-14",   dockerfile: "upgrades/10-to-14/Dockerfile"   }
+          - { tag: "10-to-15",   dockerfile: "upgrades/10-to-15/Dockerfile"   }
+          - { tag: "10-to-16",   dockerfile: "upgrades/10-to-16/Dockerfile"   }
+          # ── From 11 ───────────────────────────────────────────────────────
+          - { tag: "11-to-14",   dockerfile: "upgrades/11-to-14/Dockerfile"   }
+          - { tag: "11-to-15",   dockerfile: "upgrades/11-to-15/Dockerfile"   }
+          - { tag: "11-to-16",   dockerfile: "upgrades/11-to-16/Dockerfile"   }
+          # ── From 12 ───────────────────────────────────────────────────────
+          - { tag: "12-to-14",   dockerfile: "upgrades/12-to-14/Dockerfile"   }
+          - { tag: "12-to-15",   dockerfile: "upgrades/12-to-15/Dockerfile"   }
+          - { tag: "12-to-16",   dockerfile: "upgrades/12-to-16/Dockerfile"   }
+          # ── From 13 ───────────────────────────────────────────────────────
+          - { tag: "13-to-15",   dockerfile: "upgrades/13-to-15/Dockerfile"   }
+          - { tag: "13-to-16",   dockerfile: "upgrades/13-to-16/Dockerfile"   }
+          # ── From 14 ───────────────────────────────────────────────────────
+          - { tag: "14-to-16",   dockerfile: "upgrades/14-to-16/Dockerfile"   }
+          # ── From 15 ───────────────────────────────────────────────────────
+          - { tag: "15-to-16",   dockerfile: "upgrades/15-to-16/Dockerfile"   }
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
@@ -35,7 +55,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -47,9 +67,9 @@ jobs:
           cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/pg-upgrade:${{ matrix.upgrade.tag }}
           cache-to: type=inline
 
-  # ── Run the full upgrade pipeline ─────────────────────────────────────────
+  # ── Run the full upgrade pipeline for every path ──────────────────────────
   test-upgrade:
-    name: Test Upgrade (${{ matrix.upgrade.tag }})
+    name: Test ${{ matrix.upgrade.tag }}
     runs-on: ubuntu-latest
     needs: build-and-push
 
@@ -57,48 +77,58 @@ jobs:
       fail-fast: false
       matrix:
         upgrade:
-          - tag: "9.6-to-16"
-            from_version: "9.6"
-            to_version: "16"
+          - { tag: "9.6-to-12",  from: "9.6",  to: "12"  }
+          - { tag: "9.6-to-13",  from: "9.6",  to: "13"  }
+          - { tag: "9.6-to-14",  from: "9.6",  to: "14"  }
+          - { tag: "9.6-to-15",  from: "9.6",  to: "15"  }
+          - { tag: "9.6-to-16",  from: "9.6",  to: "16"  }
+          - { tag: "10-to-14",   from: "10",   to: "14"  }
+          - { tag: "10-to-15",   from: "10",   to: "15"  }
+          - { tag: "10-to-16",   from: "10",   to: "16"  }
+          - { tag: "11-to-14",   from: "11",   to: "14"  }
+          - { tag: "11-to-15",   from: "11",   to: "15"  }
+          - { tag: "11-to-16",   from: "11",   to: "16"  }
+          - { tag: "12-to-14",   from: "12",   to: "14"  }
+          - { tag: "12-to-15",   from: "12",   to: "15"  }
+          - { tag: "12-to-16",   from: "12",   to: "16"  }
+          - { tag: "13-to-15",   from: "13",   to: "15"  }
+          - { tag: "13-to-16",   from: "13",   to: "16"  }
+          - { tag: "14-to-16",   from: "14",   to: "16"  }
+          - { tag: "15-to-16",   from: "15",   to: "16"  }
 
     steps:
       - name: Pull image
         run: |
           docker pull ${{ secrets.DOCKERHUB_USERNAME }}/pg-upgrade:${{ matrix.upgrade.tag }}-${{ github.sha }}
 
-      - name: Create Docker volumes
+      - name: Create volumes
         run: |
-          docker volume create pg-old-data-${{ matrix.upgrade.from_version }}
-          docker volume create pg-new-data-${{ matrix.upgrade.to_version }}
+          docker volume create pg-old-${{ matrix.upgrade.from }}
+          docker volume create pg-new-${{ matrix.upgrade.to }}
 
-      # Step A: Initialise PostgreSQL <old> with test data
-      - name: Init PostgreSQL ${{ matrix.upgrade.from_version }} cluster
+      - name: Init PostgreSQL ${{ matrix.upgrade.from }}
         run: |
           docker run --rm \
-            -v pg-old-data-${{ matrix.upgrade.from_version }}:/var/lib/postgresql/${{ matrix.upgrade.from_version }}/main \
+            -v pg-old-${{ matrix.upgrade.from }}:/var/lib/postgresql/${{ matrix.upgrade.from }}/main \
             ${{ secrets.DOCKERHUB_USERNAME }}/pg-upgrade:${{ matrix.upgrade.tag }}-${{ github.sha }} \
             init-old
 
-      # Step B: Upgrade via pg_upgrade
-      - name: Run pg_upgrade (${{ matrix.upgrade.from_version }} → ${{ matrix.upgrade.to_version }})
+      - name: Upgrade ${{ matrix.upgrade.from }} → ${{ matrix.upgrade.to }}
         run: |
           docker run --rm \
-            -v pg-old-data-${{ matrix.upgrade.from_version }}:/var/lib/postgresql/${{ matrix.upgrade.from_version }}/main \
-            -v pg-new-data-${{ matrix.upgrade.to_version }}:/var/lib/postgresql/${{ matrix.upgrade.to_version }}/main \
+            -v pg-old-${{ matrix.upgrade.from }}:/var/lib/postgresql/${{ matrix.upgrade.from }}/main \
+            -v pg-new-${{ matrix.upgrade.to }}:/var/lib/postgresql/${{ matrix.upgrade.to }}/main \
             ${{ secrets.DOCKERHUB_USERNAME }}/pg-upgrade:${{ matrix.upgrade.tag }}-${{ github.sha }} \
             upgrade
 
-      # Step C: Verify the upgraded cluster
-      - name: Verify PostgreSQL ${{ matrix.upgrade.to_version }} cluster
+      - name: Verify PostgreSQL ${{ matrix.upgrade.to }}
         run: |
           docker run --rm \
-            -v pg-new-data-${{ matrix.upgrade.to_version }}:/var/lib/postgresql/${{ matrix.upgrade.to_version }}/main \
+            -v pg-new-${{ matrix.upgrade.to }}:/var/lib/postgresql/${{ matrix.upgrade.to }}/main \
             ${{ secrets.DOCKERHUB_USERNAME }}/pg-upgrade:${{ matrix.upgrade.tag }}-${{ github.sha }} \
             verify
 
-      - name: Cleanup volumes
+      - name: Cleanup
         if: always()
         run: |
-          docker volume rm \
-            pg-old-data-${{ matrix.upgrade.from_version }} \
-            pg-new-data-${{ matrix.upgrade.to_version }} || true
+          docker volume rm pg-old-${{ matrix.upgrade.from }} pg-new-${{ matrix.upgrade.to }} || true
