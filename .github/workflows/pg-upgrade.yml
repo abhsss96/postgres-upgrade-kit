@@ -105,6 +105,7 @@ jobs:
         run: |
           docker volume create pg-old-${{ matrix.upgrade.from }}
           docker volume create pg-new-${{ matrix.upgrade.to }}
+          docker volume create pg-reports
 
       - name: Init PostgreSQL ${{ matrix.upgrade.from }}
         run: |
@@ -118,6 +119,7 @@ jobs:
           docker run --rm \
             -v pg-old-${{ matrix.upgrade.from }}:/var/lib/postgresql/${{ matrix.upgrade.from }}/main \
             -v pg-new-${{ matrix.upgrade.to }}:/var/lib/postgresql/${{ matrix.upgrade.to }}/main \
+            -v pg-reports:/reports \
             ${{ secrets.DOCKERHUB_USERNAME }}/pg-upgrade:${{ matrix.upgrade.tag }}-${{ github.sha }} \
             upgrade
 
@@ -125,10 +127,18 @@ jobs:
         run: |
           docker run --rm \
             -v pg-new-${{ matrix.upgrade.to }}:/var/lib/postgresql/${{ matrix.upgrade.to }}/main \
+            -v pg-reports:/reports \
             ${{ secrets.DOCKERHUB_USERNAME }}/pg-upgrade:${{ matrix.upgrade.tag }}-${{ github.sha }} \
             verify
+
+      - name: Publish upgrade summary
+        if: always()
+        run: |
+          docker run --rm -v pg-reports:/reports alpine:3 cat /reports/upgrade.md \
+            >> "$GITHUB_STEP_SUMMARY" \
+          || echo "_No upgrade report generated._" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cleanup
         if: always()
         run: |
-          docker volume rm pg-old-${{ matrix.upgrade.from }} pg-new-${{ matrix.upgrade.to }} || true
+          docker volume rm pg-old-${{ matrix.upgrade.from }} pg-new-${{ matrix.upgrade.to }} pg-reports || true

@@ -5,8 +5,11 @@ NEW_PG_VERSION="${NEW_PG_VERSION:?NEW_PG_VERSION env var must be set}"
 NEW_DATA_DIR="/var/lib/postgresql/${NEW_PG_VERSION}/main"
 NEW_BIN="/usr/lib/postgresql/${NEW_PG_VERSION}/bin"
 PSQL="${NEW_BIN}/psql"
+REPORT_FILE="/reports/upgrade.md"
 
 hr() { printf '%.0s─' {1..70}; echo; }
+has_report() { [ -d "/reports" ] && [ -w "/reports" ]; }
+rpt() { has_report && echo "$1" >> "${REPORT_FILE}"; }
 
 echo "==> Starting PostgreSQL ${NEW_PG_VERSION}"
 "${NEW_BIN}/pg_ctl" -D "${NEW_DATA_DIR}" -l "${NEW_DATA_DIR}/pg.log" start -w
@@ -20,10 +23,16 @@ fi
 PASS=0
 FAIL=0
 
-pass() { echo "  [PASS] $1"; (( PASS++ )) || true; }
+pass() {
+  echo "  [PASS] $1"
+  (( PASS++ )) || true
+  rpt "| ✅ | $1 |"
+}
+
 fail() {
   echo "  [FAIL] $1"
   (( FAIL++ )) || true
+  rpt "| ❌ | $1 |"
   "${NEW_BIN}/pg_ctl" -D "${NEW_DATA_DIR}" stop -m fast
   exit 1
 }
@@ -31,6 +40,14 @@ fail() {
 run_sql() { "${PSQL}" -U postgres -h 127.0.0.1 -d "$1" -tAc "$2"; }
 
 # ── Integrity checks ──────────────────────────────────────────────────────────
+
+if has_report; then
+  rpt ""
+  rpt "### Verification checks"
+  rpt ""
+  rpt "| Result | Check |"
+  rpt "|---|---|"
+fi
 
 echo ""
 echo "==> Verifying databases"
@@ -87,6 +104,23 @@ echo ""
 printf "  %-30s %15s\n" "Total cluster size:" "$(du -sh "${NEW_DATA_DIR}" 2>/dev/null | cut -f1)"
 hr
 
+if has_report; then
+  rpt ""
+  rpt "### Database sizes (post-upgrade)"
+  rpt ""
+  rpt "| Database | Size |"
+  rpt "|---|---|"
+  while IFS='|' read -r dbname size; do
+    rpt "| \`${dbname}\` | ${size} |"
+  done < <(run_sql postgres "
+    SELECT datname, pg_size_pretty(pg_database_size(datname))
+    FROM pg_database
+    WHERE datname NOT IN ('template0','template1')
+    ORDER BY pg_database_size(datname) DESC;
+  ")
+  rpt "| **Total cluster** | **$(du -sh "${NEW_DATA_DIR}" 2>/dev/null \| cut -f1)** |"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 "${NEW_BIN}/pg_ctl" -D "${NEW_DATA_DIR}" stop -m fast
@@ -100,3 +134,10 @@ printf "  %-10s %d\n" "Failed:" "${FAIL}"
 hr
 echo ""
 echo "==> All checks passed. PostgreSQL ${NEW_PG_VERSION} upgrade is healthy."
+
+if has_report; then
+  rpt ""
+  rpt "### Verification result"
+  rpt ""
+  rpt "✅ **All ${PASS} checks passed.**"
+fi
