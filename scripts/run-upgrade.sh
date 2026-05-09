@@ -5,6 +5,12 @@ OLD_DATA_DIR="/var/lib/postgresql/9.6/main"
 NEW_DATA_DIR="/var/lib/postgresql/16/main"
 OLD_BIN="/usr/lib/postgresql/9.6/bin"
 NEW_BIN="/usr/lib/postgresql/16/bin"
+WORK_DIR="/var/lib/postgresql"
+
+# pg_upgrade writes log files and post-upgrade scripts (analyze_new_cluster.sh,
+# delete_old_cluster.sh) to the current working directory, which must be
+# writable by the postgres user.
+cd "${WORK_DIR}"
 
 echo "==> Initializing PostgreSQL 16 cluster at ${NEW_DATA_DIR}"
 "${NEW_BIN}/initdb" \
