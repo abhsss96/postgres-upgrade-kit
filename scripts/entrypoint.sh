@@ -17,9 +17,9 @@ case "${1:-}" in
     echo "Usage: docker run <image> <command>"
     echo ""
     echo "Commands:"
-    echo "  init-old   Initialize PostgreSQL 9.6 cluster and create test databases"
-    echo "  upgrade    Run pg_upgrade from 9.6 to 16"
-    echo "  verify     Start PostgreSQL 16 and verify upgraded databases"
+    echo "  init-old   Initialize PostgreSQL ${OLD_PG_VERSION} cluster and create test databases"
+    echo "  upgrade    Run pg_upgrade from ${OLD_PG_VERSION} to ${NEW_PG_VERSION}"
+    echo "  verify     Start PostgreSQL ${NEW_PG_VERSION} and verify upgraded databases"
     exit 1
     ;;
 esac
