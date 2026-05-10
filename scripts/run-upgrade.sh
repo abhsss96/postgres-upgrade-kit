@@ -120,7 +120,8 @@ UPGRADE_START=$(date +%s)
   -b "${OLD_BIN}" \
   -B "${NEW_BIN}" \
   -d "${OLD_DATA_DIR}" \
-  -D "${NEW_DATA_DIR}"
+  -D "${NEW_DATA_DIR}" \
+|| { _print_pg_upgrade_logs; exit 1; }
 
 UPGRADE_END=$(date +%s)
 UPGRADE_SECS=$(( UPGRADE_END - UPGRADE_START ))
