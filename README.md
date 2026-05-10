@@ -76,33 +76,31 @@ See [Adding a New Upgrade Path](#adding-a-new-upgrade-path) to request or contri
 
 ```
 pg_upgrade/
-├── upgrades/
-│   └── 9.6-to-16/
-│       └── Dockerfile          # Sets OLD/NEW_PG_VERSION; sources PG 9.6 binaries
+├── Dockerfile                  # Generic parameterized build (accepts build args)
 ├── scripts/
 │   ├── entrypoint.sh           # Dispatches init-old / upgrade / verify
 │   ├── init-old-cluster.sh     # Seeds old cluster with schema-heavy test data
+│   ├── install-extensions.sh   # Installs extension packages at build time
 │   ├── run-upgrade.sh          # Runs pg_upgrade + prints before/after snapshots
 │   └── verify-new-cluster.sh   # Asserts integrity + prints DB size report
 ├── .github/
 │   └── workflows/
-│       └── pg-upgrade.yml      # Matrix CI: builds image, runs full pipeline
+│       └── pg-upgrade.yml      # Matrix CI: builds all images, runs full pipeline
 └── README.md
 ```
 
-The scripts are fully parameterized via `OLD_PG_VERSION` and `NEW_PG_VERSION` environment variables set in each upgrade path's Dockerfile — adding a new path requires no script changes.
+Every upgrade path is a set of build args passed to the same `Dockerfile`. Adding a new path is a one-file change to the CI matrix — no script changes needed.
 
 ---
 
 ## Quick Start (Local)
 
 ```bash
-# 1. Build — use any per-path Dockerfile, or the generic one with build args
-docker build -f upgrades/13-to-16/Dockerfile -t pg-upgrade:13-to-16 .
-
-# Or build any path without a dedicated Dockerfile:
-# docker build --build-arg OLD_PG_VERSION=13 --build-arg NEW_PG_VERSION=16 \
-#   -t pg-upgrade:13-to-16 .
+# 1. Build
+docker build \
+  --build-arg OLD_PG_VERSION=13 \
+  --build-arg NEW_PG_VERSION=16 \
+  -t pg-upgrade:13-to-16 .
 
 # 2. Create volumes
 docker volume create pg-old-data
@@ -111,21 +109,27 @@ docker volume create pg-new-data
 # 3. Seed PostgreSQL 13 with test data
 docker run --rm \
   -v pg-old-data:/var/lib/postgresql/13/main \
-  abhsss/pg-upgrade:13-to-16 init-old
+  pg-upgrade:13-to-16 init-old
 
 # 4. Upgrade to PostgreSQL 16
 docker run --rm \
   -v pg-old-data:/var/lib/postgresql/13/main \
   -v pg-new-data:/var/lib/postgresql/16/main \
-  abhsss/pg-upgrade:13-to-16 upgrade
+  pg-upgrade:13-to-16 upgrade
 
 # 5. Verify
 docker run --rm \
   -v pg-new-data:/var/lib/postgresql/16/main \
-  abhsss/pg-upgrade:13-to-16 verify
+  pg-upgrade:13-to-16 verify
 
 # 6. Cleanup
 docker volume rm pg-old-data pg-new-data
+```
+
+Or pull a pre-built image from DockerHub and skip step 1:
+
+```bash
+docker pull abhsss/pg-upgrade:13-to-16
 ```
 
 ---
@@ -353,38 +357,24 @@ The upgraded cluster performs identically to a fresh PostgreSQL 16 installation 
 
 ## Adding a New Upgrade Path
 
-The repo ships a **generic `Dockerfile`** at the root that accepts build args,
-so adding a new path is a two-step change.
+Adding a path is a single-file change to `.github/workflows/pg-upgrade.yml`. Add one entry to the `build-and-push` matrix and one to the `test-upgrade` matrix:
 
-1. **Create the per-path Dockerfile** at `upgrades/<old>-to-<new>/Dockerfile`.
-   It is a minimal wrapper that pins its own defaults — copy any existing one
-   and change the three `ARG` defaults at the top:
+```yaml
+# build-and-push matrix
+- { tag: "14-to-17", from: "14", to: "17", old_distro: "-bookworm", distro: "bookworm" }
 
-   ```dockerfile
-   ARG OLD_PG_VERSION=14
-   ARG NEW_PG_VERSION=17
-   ARG NEW_PG_DISTRO=bookworm   # use bookworm for PG 17+
-   ```
+# test-upgrade matrix
+- { tag: "14-to-17", from: "14", to: "17" }
+```
 
-   > **Note for PG 17+ targets:** Debian Bookworm uses OpenSSL 3 (`libssl.so.3`).
-   > Old versions 9.6–14 were compiled against `libssl.so.1.1` (Bullseye).
-   > Add a `COPY --from=old_binaries` line for `libssl.so.1.1` and run
-   > `ldconfig` to make both coexist. See [issue #TBD] for a tracked example.
+The `distro` field selects the Debian release for the runtime image (`postgres:<new>-<distro>`). Use `bookworm` for PG 17+. The `old_distro` suffix pins the source image to a specific Debian release to avoid GLIBC mismatches — use `-bookworm` for PG 12–17, leave empty for EOL versions (9.6, 10, 11).
 
-2. **Add the path to both matrices** in `.github/workflows/pg-upgrade.yml`:
+No script changes are needed.
 
-   ```yaml
-   # build-and-push matrix
-   - { tag: "14-to-17", dockerfile: "upgrades/14-to-17/Dockerfile" }
-
-   # test-upgrade matrix
-   - { tag: "14-to-17", from: "14", to: "17" }
-   ```
-
-No changes to the shared scripts are needed.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for a full walkthrough including how to test locally before opening a PR.
 
 ---
 
 ## Contributing
 
-Contributions for additional upgrade paths, improved verification queries, or production hardening are welcome. Please open an issue to discuss scope before sending a pull request.
+Contributions for additional upgrade paths, new extension support, improved verification queries, or production hardening are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
