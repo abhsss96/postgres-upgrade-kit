@@ -134,12 +134,18 @@ jobs:
           - { tag: "13-to-16",   from: "13",   to: "16"  }
           - { tag: "14-to-16",   from: "14",   to: "16"  }
           - { tag: "15-to-16",   from: "15",   to: "16"  }
-          - { tag: "9.6-to-16-postgis",  from: "9.6", to: "16" }
-          - { tag: "11-to-16-postgis",   from: "11",  to: "16" }
-          - { tag: "13-to-16-postgis",   from: "13",  to: "16" }
-          - { tag: "15-to-16-postgis",   from: "15",  to: "16" }
+          - { tag: "9.6-to-16-postgis",  from: "9.6", to: "16", old_image: "postgis/postgis:9.6-3.0", extensions: "postgis" }
+          - { tag: "11-to-16-postgis",   from: "11",  to: "16", old_image: "postgis/postgis:11-3.1",  extensions: "postgis" }
+          - { tag: "13-to-16-postgis",   from: "13",  to: "16", old_image: "postgis/postgis:13-3.4",  extensions: "postgis" }
+          - { tag: "15-to-16-postgis",   from: "15",  to: "16", old_image: "postgis/postgis:15-3.4",  extensions: "postgis" }
 
     steps:
+      # Needed for PostGIS paths: init-old-cluster.sh is mounted into the
+      # postgis/postgis source image which doesn't include our scripts.
+      - name: Checkout
+        if: matrix.upgrade.old_image != ''
+        uses: actions/checkout@v6
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -159,11 +165,26 @@ jobs:
 
       - name: Init PostgreSQL ${{ matrix.upgrade.from }}
         run: |
-          docker run --rm \
-            -v pg-old-${{ matrix.upgrade.from }}:/var/lib/postgresql/${{ matrix.upgrade.from }}/main \
-            -v pg-reports:/reports \
-            ghcr.io/${{ github.repository_owner }}/pg-upgrade:${{ matrix.upgrade.tag }}-${{ github.sha }} \
-            init-old
+          if [ -n "${{ matrix.upgrade.old_image }}" ]; then
+            # PostGIS path: run init inside the postgis/postgis source image so
+            # CREATE EXTENSION postgis succeeds without needing files from the
+            # pg-upgrade build stage. The init script is mounted from the checkout.
+            docker run --rm \
+              -v "${{ github.workspace }}/scripts/init-old-cluster.sh:/init-old-cluster.sh:ro" \
+              -v "pg-old-${{ matrix.upgrade.from }}:/var/lib/postgresql/${{ matrix.upgrade.from }}/main" \
+              -v "pg-reports:/reports" \
+              -e "OLD_PG_VERSION=${{ matrix.upgrade.from }}" \
+              -e "NEW_PG_VERSION=${{ matrix.upgrade.to }}" \
+              -e "EXTENSIONS=${{ matrix.upgrade.extensions }}" \
+              "${{ matrix.upgrade.old_image }}" \
+              bash -c 'mkdir -p /reports && chown postgres:postgres /reports && exec gosu postgres bash /init-old-cluster.sh'
+          else
+            docker run --rm \
+              -v "pg-old-${{ matrix.upgrade.from }}:/var/lib/postgresql/${{ matrix.upgrade.from }}/main" \
+              -v "pg-reports:/reports" \
+              "ghcr.io/${{ github.repository_owner }}/pg-upgrade:${{ matrix.upgrade.tag }}-${{ github.sha }}" \
+              init-old
+          fi
 
       - name: Upgrade ${{ matrix.upgrade.from }} → ${{ matrix.upgrade.to }}
         run: |

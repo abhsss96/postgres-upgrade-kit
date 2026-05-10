@@ -7,7 +7,13 @@ OLD_DATA_DIR="/var/lib/postgresql/${OLD_PG_VERSION}/main"
 OLD_BIN="/usr/lib/postgresql/${OLD_PG_VERSION}/bin"
 # Use the new version's psql — it is backward-compatible with older servers
 # and avoids libreadline ABI mismatches between the source and target distros.
-PSQL="/usr/lib/postgresql/${NEW_PG_VERSION}/bin/psql"
+# Use new-version psql when available (pg-upgrade image); fall back to old
+# version when running directly inside a source-only image (e.g. postgis/postgis).
+if [ -x "/usr/lib/postgresql/${NEW_PG_VERSION}/bin/psql" ]; then
+  PSQL="/usr/lib/postgresql/${NEW_PG_VERSION}/bin/psql"
+else
+  PSQL="/usr/lib/postgresql/${OLD_PG_VERSION}/bin/psql"
+fi
 REPORT_FILE="/reports/upgrade.md"
 OLD_DB_SIZES_FILE="/reports/old-db-sizes.txt"
 
