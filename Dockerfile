@@ -36,17 +36,22 @@ RUN chmod +x /tmp/install-extensions.sh && \
 RUN mkdir /tmp/icu-libs && \
     find /usr/lib -name 'libicu*.so*' ! -name '*.a' -exec cp {} /tmp/icu-libs/ \;
 
-# Collect PostGIS dependency .so files (libproj, libgdal) so the
-# runtime can load old extension binaries even when distro library versions
-# differ (e.g. Stretch libproj.so.12 vs Bullseye libproj.so.19).
+# Collect PostGIS dependency .so files whose SONAMEs differ between the source
+# and runtime distros so the runtime can load old extension binaries:
+#   libproj:   .so.12 (Stretch PROJ 4.9)    vs .so.19 (Bullseye PROJ 7.2)
+#   libgdal:   .so.20 (Stretch GDAL 2.1)    vs .so.28 (Bullseye GDAL 3.2)
+#   libjson-c: .so.3  (Stretch json-c 0.12) vs .so.5  (Bullseye json-c 0.15)
+# Search both /usr/lib and /lib — on Stretch some system libs live in /lib
+# rather than /usr/lib (pre-usrmerge). On Bullseye+ /lib is a symlink to
+# /usr/lib so the double search is harmless.
 # libgeos is intentionally excluded: its SONAME (libgeos_c.so.1) is ABI-stable
 # across 3.x releases, so the system GEOS on the runtime distro works for old
 # PostGIS binaries. Including old libgeos here would shadow the system GEOS via
 # ldconfig priority (pg-compat.conf < x86_64-linux-gnu.conf alphabetically),
 # causing PostGIS 16 to load an old GEOS that lacks GEOSSymDifferencePrec.
 RUN mkdir /tmp/postgis-ext-libs && \
-    find /usr/lib -maxdepth 3 \
-      \( -name 'libproj*.so*' -o -name 'libgdal*.so*' \) \
+    find /usr/lib /lib -maxdepth 3 \
+      \( -name 'libproj*.so*' -o -name 'libgdal*.so*' -o -name 'libjson-c*.so*' \) \
       ! -name '*.a' ! -name '*.la' \
       -exec cp {} /tmp/postgis-ext-libs/ \; 2>/dev/null || true
 
